@@ -6,6 +6,7 @@ use Balticode\Billink\Gateway\Config\Config;
 use Balticode\Billink\Gateway\Helper\SubjectReader;
 use Balticode\Billink\Gateway\Validator\OrderDataValidator;
 use Magento\Payment\Gateway\Response\HandlerInterface;
+use Magento\Framework\DB\TransactionFactory;
 
 /**
  * Class Handler
@@ -24,17 +25,24 @@ class Handler implements HandlerInterface
     private $config;
 
     /**
+     * @var TransactionFactory
+     */
+    private $transactionFactory;
+
+    /**
      * Handler constructor.
      * @param SubjectReader $subjectReader
      * @param Config $config
+     * @param TransactionFactory $transactionFactory
      */
     public function __construct(
         SubjectReader $subjectReader,
-        Config $config
+        Config $config,
+        TransactionFactory $transactionFactory
     ) {
-
         $this->subjectReader = $subjectReader;
         $this->config = $config;
+        $this->transactionFactory = $transactionFactory;
     }
 
     /**
@@ -53,5 +61,16 @@ class Handler implements HandlerInterface
         /** @var \Magento\Sales\Model\Order $order */
         $order = $this->subjectReader->readOrder($handlingSubject);
         $order->addStatusHistoryComment('Order was created in Billink system.');
+
+        if ($order->canInvoice()) {
+            $invoice = $order->prepareInvoice()
+                ->register()
+                ->setState(\Magento\Sales\Model\Order\Invoice::STATE_PAID);
+            $this->transactionFactory->create()
+                ->addObject($order)
+                ->addObject($invoice)
+                ->save();
+            $order->addStatusHistoryComment('Invoice was automatically registered and set to paid');
+        }
     }
 }
